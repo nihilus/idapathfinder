@@ -5,12 +5,12 @@ import pathfinder
 
 class PathFinderGraph(idaapi.GraphViewer):
 
-	def __init__(self, frm, to, results):
-		idaapi.GraphViewer.__init__(self, "Call graph from " + frm + " to " + to)
+	def __init__(self, results, title):
+		idaapi.GraphViewer.__init__(self, title)
 		self.ids = {}
 		self.nodes = {}
-		self.include = ''
 		self.history = []
+		self.includes = []
 		self.excludes = []
 		self.edge_nodes = []
 		self.delete_on_click = False
@@ -25,8 +25,9 @@ class PathFinderGraph(idaapi.GraphViewer):
 		for path in self.results:
 			nogo = False
 
-			if self.include and self.include not in path:
-				continue
+			for include in self.includes:
+				if include not in path:
+					nogo = True
 
 			for exclude in self.excludes:
 				if exclude in path:
@@ -75,9 +76,9 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self.delete_on_click = False
 			self.excludes.append(self.nodes[node_id])
 			self.history.append('exclude')
-		elif self.include_on_click and not self.include:
+		elif self.include_on_click:
 			self.include_on_click = False
-			self.include = self.nodes[node_id]
+			self.includes.append(self.nodes[node_id])
 			self.history.append('include')
 		self.Refresh()
 
@@ -87,7 +88,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 		else:
 			self.cmd_undo = self.AddCommand("Undo", "U")
 			self.cmd_reset = self.AddCommand("Reset graph", "R")
-			self.cmd_delete = self.AddCommand("Delete node", "D")
+			self.cmd_delete = self.AddCommand("Exclude node", "X")
 			self.cmd_include = self.AddCommand("Include node", "I")
 			return True
 
@@ -96,23 +97,20 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.include_on_click = False
 		
 		if self.history:
-			last_action = self.history[-1]
+			last_action = self.history.pop(-1)
 		else:
 			last_action = None
 
-		if last_action == 'include':
-			self.include = ''
-		elif self.excludes:
+		if last_action == 'include' and self.includes:
+			self.includes.pop(-1)
+		elif last_action == 'exclude' and self.excludes:
 			self.excludes.pop(-1)
 			
-		if self.history:
-			self.history.pop(-1)
-
 		self.Refresh()
 
 	def _reset(self):
-		self.include = ''
 		self.history = []
+		self.includes = []
 		self.excludes = []
 		self.delete_on_click = False
 		self.include_on_click = False
@@ -136,7 +134,9 @@ class idapathfinder_t(idaapi.plugin_t):
 		return None
 	
 	def run(self, arg):
-		source = GetFunctionName(ScreenEA())
+		ea = ScreenEA()
+		source = GetFunctionName(ea)
+
 		if source:
 			target = AskIdent(source, 'Find paths to')
 			if target:
@@ -144,9 +144,11 @@ class idapathfinder_t(idaapi.plugin_t):
 				results = pf.paths_from(source)
 				del pf
 
-				g = PathFinderGraph(source, target, results)
+				g = PathFinderGraph(results, "Call graph from " + source + " to " + target)
 				g.Show()
 				del g
+		else:
+			print "ERROR: Address 0x%X is not part of a defined function." % ea
 
 def PLUGIN_ENTRY():
 	return idapathfinder_t()
