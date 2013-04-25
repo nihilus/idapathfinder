@@ -12,7 +12,7 @@ except:
 
 files = [
 	os.path.join('python', 'pathfinder.py'),
-	os.path.join('plugins', 'pathfinder.py')
+	os.path.join('plugins', 'idapathfinder.py')
 ]
 
 if os.path.exists(ida_dir):
