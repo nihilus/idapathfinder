@@ -1,4 +1,5 @@
 #!/usr/bin/env python
+# Simple installer script to drop the files where they need to be.
 
 import sys
 import shutil
