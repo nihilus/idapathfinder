@@ -44,14 +44,26 @@ class idapathfinder_t(idaapi.plugin_t):
 		ui_path = "View/Graphs/"
 		self.menu_contexts = []
 
+		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
+								"Find paths from multiple functions to here",
+								"Alt-8",
+								0,
+								self.FindPathsFromMany,
+								(None,)))
+		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
+								"Find paths from a single function to here",
+								"Alt-7",
+								0,
+								self.FindPathsFromSingle,
+								(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path, 
-								"Find multiple paths from current function", 
+								"Find paths from here to multiple functions", 
 								"Alt-6", 
 								0, 
 								self.FindPathsToMany, 
 								(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path, 
-								"Find single path from current function", 
+								"Find paths from here to a single function", 
 								"Alt-5", 
 								0, 
 								self.FindPathsToSingle, 
@@ -69,44 +81,70 @@ class idapathfinder_t(idaapi.plugin_t):
 	def _current_function(self):
 		return GetFunctionName(ScreenEA())
 
+	def _find_and_plot_paths(self, sources, targets):
+		results = []
+
+		for target in targets:
+			pf = pathfinder.PathFinder(target)
+			for source in sources:
+				results += pf.paths_from(source)
+			del pf
+
+		title = "Call graph from " + source
+		if len(targets) == 1:
+			title += " to " + target[0]
+
+		g = pathfinder.PathFinderGraph(results, title)
+		g.Show()
+		del g
+
+	def _get_user_selected_functions(self, many=False):
+		functions = []
+
+		fc = FunctionChooser()
+		while True:
+			function = fc.GetUserInput()
+			if not function:
+				break
+			else:
+				functions.append(function)
+
+			if not many:
+				break
+
+		return functions
+			
 	def FindPathsToSingle(self, arg):
 		source = self._current_function()
 
 		if source:
-			fc = FunctionChooser()
-			target = fc.GetUserInput()
-			if target:
-				pf = pathfinder.PathFinder(target)
-				results = pf.paths_from(source)
-				del pf
-
-				g = pathfinder.PathFinderGraph(results, "Call graph from " + source + " to " + target)
-				g.Show()
-				del g
+			targets = self._get_user_selected_functions()
+			if targets:
+				self._find_and_plot_paths([source], targets)
 
 	def FindPathsToMany(self, arg):
-		targets = []
-		results = []
 		source = self._current_function()
 
 		if source:
-			fc = FunctionChooser()
-			while True:
-				target = fc.GetUserInput()
-				if not target:
-					break
-				else:
-					targets.append(target)
-
+			targets = self._get_user_selected_functions(many=True)
 			if targets:
-				for target in targets:
-					pf = pathfinder.PathFinder(target)
-					results += pf.paths_from(source)
-					del pf
+				self._find_and_plot_paths([source], targets)
 
-				g = pathfinder.PathFinderGraph(results, "Call graph from " + source)
-				g.Show()
-				del g
+	def FindPathsFromSingle(self, arg):
+		target = self._current_function()
+
+		if target:
+			sources = self._get_user_selected_functions()
+			if sources:
+				self._find_and_plot_paths(sources, [target])
+
+	def FindPathsFromMany(self, arg):
+		target = self._current_function()
+
+		if target:
+			sources = self._get_user_selected_functions(many=True)
+			if sources:
+				self._find_and_plot_paths(sources, [target])
 
 def PLUGIN_ENTRY():
 	return idapathfinder_t()
