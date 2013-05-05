@@ -4,7 +4,7 @@ import idautils
 
 class PathFinderGraph(idaapi.GraphViewer):
 
-	def __init__(self, results, title):
+	def __init__(self, results, title="PathFinder Graph"):
 		idaapi.GraphViewer.__init__(self, title)
 		self.ids = {}
 		self.nodes = {}
