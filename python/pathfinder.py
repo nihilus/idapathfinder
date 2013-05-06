@@ -68,7 +68,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self._reset()
 
 	def OnDblClick(self, node_id):
-		idc.Jump(idc.LocByName(self.nodes[node_id]))
+		idc.Jump(self._node_offset(node_id))
 
 	def OnClick(self, node_id):
 		if self.delete_on_click:
@@ -85,11 +85,42 @@ class PathFinderGraph(idaapi.GraphViewer):
 		if not idaapi.GraphViewer.Show(self):
 			return False
 		else:
+			# TODO: Add a colorize option to highlight all *displayed* nodes. Undo should undo the colorization as well.
+			#       Or maybe colorization should be automatic, but removed when the window is closed?
 			self.cmd_undo = self.AddCommand("Undo", "U")
 			self.cmd_reset = self.AddCommand("Reset graph", "R")
 			self.cmd_delete = self.AddCommand("Exclude node", "X")
 			self.cmd_include = self.AddCommand("Include node", "I")
 			return True
+
+	def _node_offset(self, node_id):
+		delim = None
+		loc = idc.BADADDR
+		func_off_delims = [':', '+']
+
+		for d in func_off_delims:
+			if d in self.nodes[node_id]:
+				delim = d
+				break
+
+		if delim:
+			(function_name, offset_str) = self.nodes[node_id].split(delim, 1)
+			loc = idc.LocByName(function_name)
+			try:
+				loc += int(offset_str, 16)
+			except:
+				try:
+					loc += int(offset_str, 10)
+				except:
+					# TODO: This doesn't work, especially when the location offset string is a custom name 
+					# (e.g., there may be other nodes in other functions named 'end')
+					loc_name_offset = idc.LocByName(offset_str)
+					if loc_name_offset != idc.BADADDR:
+						loc += loc_name_offset
+		else:
+			loc = idc.LocByName(self.nodes[node_id])
+
+		return loc
 
 	def _undo(self):
 		self.delete_on_click = False
@@ -191,6 +222,7 @@ class PathFinder(object):
 		Called internally by self.paths_from.
 
 		@name - The start node to find a path from.
+		@i    - Used to specify the recursion depth; for internal use only.
 
 		Returns None.
 		'''
@@ -239,7 +271,7 @@ class PathFinder(object):
 				if name:
 					name_node = self.nodes[name]
 
-					for reference in [idc.GetFunctionName(x.frm) for x in idautils.XrefsTo(idc.LocByName(name)) if x.type != 21]:
+					for reference in self.node_xrefs(name):
 						if reference not in self.nodes:
 							name_node[reference] = {}
 							self.nodes[reference] = name_node[reference]
@@ -248,4 +280,45 @@ class PathFinder(object):
 							name_node[reference] = self.nodes[reference]
 			
 			names = new_names
+
+class FunctionPathFinder(PathFinder):
+
+	def node_xrefs(self, name):
+		return [idc.GetFunctionName(x.frm) for x in idautils.XrefsTo(idc.LocByName(name)) if x.type != 21]
+
+class BlockPathFinder(PathFinder):
+
+	def __init__(self, ea):
+		f = idaapi.get_func(ea)
+		self.blocks = idaapi.FlowChart(f=f)
+		
+		self.source_ea = f.startEA
+		self.source_name = idc.GetFunctionName(f.startEA)
+		self.destination = self.LookupBlock(ea=ea)
+		
+		super(BlockPathFinder, self).__init__(idc.GetFuncOffset(self.destination.startEA))
+
+	def LookupBlock(self, name=None, ea=idc.BADADDR):
+		retblock = None
+
+		for block in self.blocks:
+			if name and idc.GetFuncOffset(block.startEA) == name:
+				retblock = block
+			elif ea != idc.BADADDR and ea >= block.startEA and ea <= block.endEA:
+				retblock = block
+
+		return retblock
+		
+	def node_xrefs(self, name):
+		xrefs = []
+		block = self.LookupBlock(name)
+
+		if block and name != self.source_name and block.startEA != self.source_ea:
+			for xref in idautils.XrefsTo(block.startEA):
+				xref_block = self.LookupBlock(ea=xref.frm)
+				if xref_block:
+					xref_name = idc.GetFuncOffset(xref_block.startEA)
+					xrefs.append(xref_name)
+
+		return xrefs
 

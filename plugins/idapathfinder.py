@@ -3,35 +3,6 @@ import idaapi
 import idautils
 import pathfinder
 
-class FunctionChooser(idaapi.Choose2):
-
-	def __init__(self):
-		idaapi.Choose2.__init__(self, "Choose a function", [["Function name", 50 | idaapi.Choose2.CHCOL_PLAIN]], icon=41)
-		self.PopulateItems()
-
-	def PopulateItems(self):
-		self.items = [[idc.Name(f)] for f in idautils.Functions()]
-
-	def OnGetLine(self, n):
-		return self.items[n]
-
-	def OnGetSize(self):
-		return len(self.items)
-
-	def OnClose(self):
-		'''
-		Although we don't use it, this MUST be defined or the chooser will never even be displayed by IDA.
-		'''
-		pass
-
-	def GetUserInput(self):
-		n = self.Show(modal=True)
-		if n > -1:
-			return self.items[n][0]
-		else:
-			return None
-
-
 class idapathfinder_t(idaapi.plugin_t):
 
 	flags = 0
@@ -44,6 +15,12 @@ class idapathfinder_t(idaapi.plugin_t):
 		ui_path = "View/Graphs/"
 		self.menu_contexts = []
 
+		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
+								"Find paths to the current function block",
+								"Alt-9",
+								0,
+								self.FindBlockPaths,
+								(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
 								"Find paths from multiple functions to here",
 								"Alt-8",
@@ -81,18 +58,21 @@ class idapathfinder_t(idaapi.plugin_t):
 	def _current_function(self):
 		return GetFunctionName(ScreenEA())
 
-	def _find_and_plot_paths(self, sources, targets):
+	def _find_and_plot_paths(self, sources, targets, pfc=pathfinder.FunctionPathFinder):
 		results = []
 
 		for target in targets:
-			pf = pathfinder.PathFinder(target)
+			pf = pfc(target)
 			for source in sources:
 				results += pf.paths_from(source)
 			del pf
 
 		title = "Call graph from " + source
 		if len(targets) == 1:
-			title += " to " + target[0]
+			if isinstance(targets[0], type('')):
+				title += " to " + targets[0]
+			else:
+				title += " to " + idc.GetFuncOffset(targets[0])
 
 		g = pathfinder.PathFinderGraph(results, title)
 		g.Show()
@@ -101,9 +81,8 @@ class idapathfinder_t(idaapi.plugin_t):
 	def _get_user_selected_functions(self, many=False):
 		functions = []
 
-		fc = FunctionChooser()
 		while True:
-			function = fc.GetUserInput()
+			function = idc.Name(idc.ChooseFunction('Select a function'))
 			if not function:
 				break
 			else:
@@ -145,6 +124,11 @@ class idapathfinder_t(idaapi.plugin_t):
 			sources = self._get_user_selected_functions(many=True)
 			if sources:
 				self._find_and_plot_paths(sources, [target])
+
+	def FindBlockPaths(self, arg):
+		target = idc.ScreenEA()
+		source = idc.GetFunctionName(idc.ScreenEA())
+		self._find_and_plot_paths([source], [target], pfc=pathfinder.BlockPathFinder)
 
 def PLUGIN_ENTRY():
 	return idapathfinder_t()
