@@ -56,7 +56,7 @@ class idapathfinder_t(idaapi.plugin_t):
 		self.FindPathsToSingle()
 
 	def _current_function(self):
-		return GetFunctionName(ScreenEA())
+		return idaapi.get_func(ScreenEA()).startEA
 
 	def _find_and_plot_paths(self, sources, targets, pfc=pathfinder.FunctionPathFinder):
 		results = []
@@ -67,14 +67,7 @@ class idapathfinder_t(idaapi.plugin_t):
 				results += pf.paths_from(source)
 			del pf
 
-		title = "Call graph from " + source
-		if len(targets) == 1:
-			if isinstance(targets[0], type('')):
-				title += " to " + targets[0]
-			else:
-				title += " to " + idc.GetFuncOffset(targets[0])
-
-		g = pathfinder.PathFinderGraph(results, title)
+		g = pathfinder.PathFinderGraph(results, 'Path Graph')
 		g.Show()
 		del g
 
@@ -82,8 +75,8 @@ class idapathfinder_t(idaapi.plugin_t):
 		functions = []
 
 		while True:
-			function = idc.Name(idc.ChooseFunction('Select a function'))
-			if not function:
+			function = idc.ChooseFunction('Select a function')
+			if not function or function == idc.BADADDR:
 				break
 			else:
 				functions.append(function)
@@ -99,6 +92,7 @@ class idapathfinder_t(idaapi.plugin_t):
 		if source:
 			targets = self._get_user_selected_functions()
 			if targets:
+				print source, targets
 				self._find_and_plot_paths([source], targets)
 
 	def FindPathsToMany(self, arg):
@@ -127,7 +121,7 @@ class idapathfinder_t(idaapi.plugin_t):
 
 	def FindBlockPaths(self, arg):
 		target = idc.ScreenEA()
-		source = idc.GetFunctionName(idc.ScreenEA())
+		source = idaapi.get_func(idc.ScreenEA()).startEA
 		self._find_and_plot_paths([source], [target], pfc=pathfinder.BlockPathFinder)
 
 def PLUGIN_ENTRY():

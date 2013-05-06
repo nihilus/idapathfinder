@@ -34,15 +34,17 @@ class PathFinderGraph(idaapi.GraphViewer):
 					break
 	
 			if not nogo:
-				prev_func = None
+				prev_node = None
 
-				for func in path:
-					if not self.ids.has_key(func):
-						self.ids[func] = self.AddNode(func)
-						self.nodes[self.ids[func]] = func
-					if prev_func is not None:
-						self.AddEdge(prev_func, self.ids[func])
-					prev_func = self.ids[func]
+				for node in path:
+					name = self.get_node_name(node)
+
+					if not self.ids.has_key(name):
+						self.ids[name] = self.AddNode(name)
+						self.nodes[self.ids[name]] = node
+					if prev_node is not None:
+						self.AddEdge(prev_node, self.ids[name])
+					prev_node = self.ids[name]
 
 				try:
 					self.edge_nodes.append(path[-2])
@@ -53,7 +55,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 
 	def OnGetText(self, node_id):
 		node = str(self[node_id])
-		if node in self.edge_nodes:
+		if self.nodes[node_id] in self.edge_nodes:
 			return (node, 0xff00f0)
 		return node
 
@@ -68,7 +70,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self._reset()
 
 	def OnDblClick(self, node_id):
-		idc.Jump(self._node_offset(node_id))
+		idc.Jump(self.nodes[node_id])
 
 	def OnClick(self, node_id):
 		if self.delete_on_click:
@@ -93,34 +95,11 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self.cmd_include = self.AddCommand("Include node", "I")
 			return True
 
-	def _node_offset(self, node_id):
-		delim = None
-		loc = idc.BADADDR
-		func_off_delims = [':', '+']
-
-		for d in func_off_delims:
-			if d in self.nodes[node_id]:
-				delim = d
-				break
-
-		if delim:
-			(function_name, offset_str) = self.nodes[node_id].split(delim, 1)
-			loc = idc.LocByName(function_name)
-			try:
-				loc += int(offset_str, 16)
-			except:
-				try:
-					loc += int(offset_str, 10)
-				except:
-					# TODO: This doesn't work, especially when the location offset string is a custom name 
-					# (e.g., there may be other nodes in other functions named 'end')
-					loc_name_offset = idc.LocByName(offset_str)
-					if loc_name_offset != idc.BADADDR:
-						loc += loc_name_offset
-		else:
-			loc = idc.LocByName(self.nodes[node_id])
-
-		return loc
+	def get_node_name(self, ea):
+		name = idc.Name(ea)
+		if not name:
+			name = idc.GetFuncOffset(ea)
+		return name
 
 	def _undo(self):
 		self.delete_on_click = False
@@ -155,7 +134,7 @@ class PathFinder(object):
 		'''
 		Class constructor.
 
-		@destination - The end node name.
+		@destination - The end node ea.
 
 		Returns None.
 		'''
@@ -178,9 +157,9 @@ class PathFinder(object):
 		'''
 		Find paths from a source node to a destination node.
 
-		@source  - The source node to start the search from.
-		@exclude - A list of function names to exclude from paths.
-		@include - A list of function names to include in paths.
+		@source  - The source node ea to start the search from.
+		@exclude - A list of ea's to exclude from paths.
+		@include - A list of ea's to include in paths.
 
 		Returns a list of path lists.
 		'''
@@ -214,15 +193,17 @@ class PathFinder(object):
 					if p not in paths:
 						paths.append(p)
 
+		print self.tree
+		print paths
 		return paths
 
-	def find_paths(self, name, i=0):
+	def find_paths(self, ea, i=0):
 		'''
 		Finds all paths from the destination to the specified name.
 		Called internally by self.paths_from.
 
-		@name - The start node to find a path from.
-		@i    - Used to specify the recursion depth; for internal use only.
+		@ea - The start node to find a path from.
+		@i  - Used to specify the recursion depth; for internal use only.
 
 		Returns None.
 		'''
@@ -230,12 +211,12 @@ class PathFinder(object):
 		this_depth = self.depth
 
 		if i == 1 and not self.tree:
-			self.build_call_tree(name)
+			self.build_call_tree(ea)
 		
 		if i >= self.MAX_DEPTH:
 			return
 
-		for (reference, children) in self.nodes[name].iteritems():
+		for (reference, children) in self.nodes[ea].iteritems():
 			if reference and reference not in self.current_path:
 				self.depth += 1
 				self.current_path.append(reference)
@@ -250,75 +231,95 @@ class PathFinder(object):
 
 		self.last_depth = self.depth	
 
-	def build_call_tree(self, name):
+	def build_call_tree(self, ea):
 		'''
 		Builds a call tree to a named function.
 
-		@name - The function name to generate a tree for.
+		@ea - The node to generate a tree for.
 
 		Returns None.
 		'''
 		tree_ptr = self.tree
 
-		tree_ptr[name] = {}
-		self.nodes[name] = tree_ptr[name]
-		names = [name]
+		tree_ptr[ea] = {}
+		self.nodes[ea] = tree_ptr[ea]
+		nodes = [ea]
 
-		while names:
-			new_names = []
+		while nodes:
+			new_nodes = []
 
-			for name in names:
-				if name:
-					name_node = self.nodes[name]
+			for node in nodes:
+				if node and node != idc.BADADDR:
+					node_ptr = self.nodes[node]
 
-					for reference in self.node_xrefs(name):
+					for reference in self.node_xrefs(node):
 						if reference not in self.nodes:
-							name_node[reference] = {}
-							self.nodes[reference] = name_node[reference]
-							new_names.append(reference)
-						elif not name_node.has_key(reference):
-							name_node[reference] = self.nodes[reference]
+							node_ptr[reference] = {}
+							self.nodes[reference] = node_ptr[reference]
+							new_nodes.append(reference)
+						elif not node_ptr.has_key(reference):
+							node_ptr[reference] = self.nodes[reference]
 			
-			names = new_names
+			nodes = new_nodes
+
+	def node_xrefs(self, node):
+		'''
+		This must be overidden by the subclass to provide a list of xrefs.
+
+		@node - The EA of the node that we need xrefs for.
+
+		Returns a list of xrefs to the specified node.
+		'''
+		return []
 
 class FunctionPathFinder(PathFinder):
 
-	def node_xrefs(self, name):
-		return [idc.GetFunctionName(x.frm) for x in idautils.XrefsTo(idc.LocByName(name)) if x.type != 21]
+	def node_xrefs(self, node):
+		'''
+		Return a list of function EA's that reference the given node.
+		'''
+		xrefs = []
+
+		for x in idautils.XrefsTo(node):
+			if x.type != 21:
+				f = idaapi.get_func(x.frm)
+				if f and f.startEA not in xrefs:
+					xrefs.append(f.startEA)
+
+		return xrefs
 
 class BlockPathFinder(PathFinder):
 
-	def __init__(self, ea):
-		f = idaapi.get_func(ea)
-		self.blocks = idaapi.FlowChart(f=f)
+	def __init__(self, destination):
+		func = idaapi.get_func(destination)
+		self.blocks = idaapi.FlowChart(f=func)
 		
-		self.source_ea = f.startEA
-		self.source_name = idc.GetFunctionName(f.startEA)
-		self.destination = self.LookupBlock(ea=ea)
+		self.source_ea = func.startEA
+		self.destination = self.LookupBlock(destination)
 		
-		super(BlockPathFinder, self).__init__(idc.GetFuncOffset(self.destination.startEA))
+		super(BlockPathFinder, self).__init__(self.destination.startEA)
 
-	def LookupBlock(self, name=None, ea=idc.BADADDR):
-		retblock = None
-
+	def LookupBlock(self, ea):
 		for block in self.blocks:
-			if name and idc.GetFuncOffset(block.startEA) == name:
-				retblock = block
-			elif ea != idc.BADADDR and ea >= block.startEA and ea <= block.endEA:
-				retblock = block
-
-		return retblock
+			if ea >= block.startEA and ea <= block.endEA:
+				return block
+		return None
 		
-	def node_xrefs(self, name):
+	def node_xrefs(self, node):
+		'''
+		Return a list of blocks the reference the provided block.
+		
+		Currently broken...
+		'''
 		xrefs = []
-		block = self.LookupBlock(name)
 
-		if block and name != self.source_name and block.startEA != self.source_ea:
-			for xref in idautils.XrefsTo(block.startEA):
-				xref_block = self.LookupBlock(ea=xref.frm)
-				if xref_block:
-					xref_name = idc.GetFuncOffset(xref_block.startEA)
-					xrefs.append(xref_name)
+		if node != self.source_ea:
+			block = self.LookupBlock(node)
+			if block:
+				for xref in idautils.XrefsTo(block.startEA):
+					xref_block = self.LookupBlock(xref.frm)
+					if xref_block:
+						xrefs.append(xref_block.startEA)
 
 		return xrefs
 
