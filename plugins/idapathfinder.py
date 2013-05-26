@@ -23,13 +23,13 @@ class idapathfinder_t(idaapi.plugin_t):
 								self.FindBlockPaths,
 								(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
-								"Find paths from multiple functions to here",
+								"Find paths to here from multiple functions",
 								"Alt-8",
 								0,
 								self.FindPathsFromMany,
 								(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
-								"Find paths from a single function to here",
+								"Find paths to here from a single function",
 								"Alt-7",
 								0,
 								self.FindPathsFromSingle,

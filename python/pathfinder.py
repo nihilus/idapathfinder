@@ -3,8 +3,19 @@ import idaapi
 import idautils
 
 class PathFinderGraph(idaapi.GraphViewer):
+	'''
+	Class for generating an idaapi.GraphViewer graph.
+	'''
 
 	def __init__(self, results, title="PathFinder Graph"):
+		'''
+		Class constructor.
+
+		@results - A list of lists, each representing a call graph.
+		@title   - The title of the graph window.
+
+		Returns None.
+		'''
 		idaapi.GraphViewer.__init__(self, title)
 		self.ids = {}
 		self.nodes = {}
@@ -15,6 +26,23 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.delete_on_click = False
 		self.include_on_click = False
 		self.results = results
+
+	def Show(self):
+		'''
+		Display the graph.
+
+		Returns True on success, False on failure.
+		'''
+		if not idaapi.GraphViewer.Show(self):
+			return False
+		else:
+			# TODO: Add a colorize option to highlight all *displayed* nodes. Undo should undo the colorization as well.
+			#       Or maybe colorization should be automatic, but removed when the window is closed?
+			self.cmd_undo = self.AddCommand("Undo", "U")
+			self.cmd_reset = self.AddCommand("Reset graph", "R")
+			self.cmd_delete = self.AddCommand("Exclude node", "X")
+			self.cmd_include = self.AddCommand("Include node", "I")
+			return True
 
 	def OnRefresh(self):
 		self.Clear()
@@ -83,18 +111,6 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self.history.append('include')
 		self.Refresh()
 
-	def Show(self):
-		if not idaapi.GraphViewer.Show(self):
-			return False
-		else:
-			# TODO: Add a colorize option to highlight all *displayed* nodes. Undo should undo the colorization as well.
-			#       Or maybe colorization should be automatic, but removed when the window is closed?
-			self.cmd_undo = self.AddCommand("Undo", "U")
-			self.cmd_reset = self.AddCommand("Reset graph", "R")
-			self.cmd_delete = self.AddCommand("Exclude node", "X")
-			self.cmd_include = self.AddCommand("Include node", "I")
-			return True
-
 	def get_node_name(self, ea):
 		name = idc.Name(ea)
 		if not name:
@@ -128,6 +144,9 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.Refresh()
 
 class PathFinder(object):
+	'''
+	Base class for finding the path between two addresses.
+	'''
 
 	# Limit the max recursion depth
 	MAX_DEPTH = 500
@@ -167,6 +186,8 @@ class PathFinder(object):
 		'''
 		paths = []
 
+		# If all the paths from the destination node have not already
+		# been calculated, find them first before doing anything else.
 		if not self.full_paths:
 			self.find_paths(self.destination)
 
@@ -190,8 +211,11 @@ class PathFinder(object):
 							break
 
 				if index > -1:
+					# Be sure to include the destinatin and source nodes in the final path
 					p = [self.destination] + p[:index+1]
+					# The path is in reverse order (destination -> source), so flip it
 					p = p[::-1]
+					# Ignore any potential duplicate paths
 					if p not in paths:
 						paths.append(p)
 
@@ -199,7 +223,7 @@ class PathFinder(object):
 
 	def find_paths(self, ea, i=0):
 		'''
-		Finds all paths from the destination to the specified name.
+		Performs a depth-first (aka, recursive) search to determine all possible call paths originating from the specified location.
 		Called internally by self.paths_from.
 
 		@ea - The start node to find a path from.
@@ -207,42 +231,56 @@ class PathFinder(object):
 
 		Returns None.
 		'''
+		# Increment recursion depth counter by 1
 		i += 1
+		# Get the current call graph depth
 		this_depth = self.depth
 
+		# If this is the first level of recursion and the call
+		# tree has not been built, then build it.
 		if i == 1 and not self.tree:
 			self.build_call_tree(ea)
-	
+
+		# Don't recurse past MAX_DEPTH	
 		if i >= self.MAX_DEPTH:
 			return
 
+		# Loop through all the nodes in the call tree, starting at the specified location
 		for (reference, children) in self.nodes[ea].iteritems():
+			# Does this node have a reference that isn't already listed in our current call path?
 			if reference and reference not in self.current_path:
+				# Increase the call depth by 1
 				self.depth += 1
+				# Add the reference to the current path
 				self.current_path.append(reference)
+				# Find all paths from this new reference
 				self.find_paths(reference, i)
 
+		# If we didn't find any additional references to append to the current call path (i.e., this_depth == call depth)
+		# then we have reached the limit of this call path.
 		if self.depth == this_depth:
+			# If the current call depth is not the same as the last recursive call, and if our list of paths
+			# does not already contain the current path, then append a copy of the current path to the list of paths
 			if self.last_depth != self.depth and self.current_path and self.current_path not in self.full_paths:
 				self.full_paths.append(list(self.current_path))
+			# Decrement the call path depth by 1 and pop the latest node out of the current call path
 			self.depth -= 1
 			if self.current_path:
 				self.current_path.pop(-1)
 
+		# Track the last call depth
 		self.last_depth = self.depth	
 
 	def build_call_tree(self, ea):
 		'''
-		Builds a call tree to a named function.
+		Performs a breadth first (aka, iterative) search to build a call tree to the specified address.
 
 		@ea - The node to generate a tree for.
 
 		Returns None.
 		'''
-		tree_ptr = self.tree
-
-		tree_ptr[ea] = {}
-		self.nodes[ea] = tree_ptr[ea]
+		self.tree[ea] = {}
+		self.nodes[ea] = self.tree[ea]
 		nodes = [ea]
 
 		while nodes:
@@ -264,7 +302,7 @@ class PathFinder(object):
 
 	def node_xrefs(self, node):
 		'''
-		This must be overidden by the subclass to provide a list of xrefs.
+		This must be overidden by a subclass to provide a list of xrefs.
 
 		@node - The EA of the node that we need xrefs for.
 
@@ -273,6 +311,9 @@ class PathFinder(object):
 		return []
 
 class FunctionPathFinder(PathFinder):
+	'''
+	Subclass to generate paths between functions.
+	'''
 
 	def node_xrefs(self, node):
 		'''
@@ -288,6 +329,9 @@ class FunctionPathFinder(PathFinder):
 		return xrefs
 
 class BlockPathFinder(PathFinder):
+	'''
+	Subclass to generate paths between code blocks inside a function.
+	'''
 
 	def __init__(self, destination):
 		func = idaapi.get_func(destination)
