@@ -99,6 +99,8 @@ class PathFinderGraph(idaapi.GraphViewer):
 		name = idc.Name(ea)
 		if not name:
 			name = idc.GetFuncOffset(ea)
+			if not name:
+				name = "0x%X" % ea
 		return name
 
 	def _undo(self):
@@ -193,8 +195,6 @@ class PathFinder(object):
 					if p not in paths:
 						paths.append(p)
 
-		print self.tree
-		print paths
 		return paths
 
 	def find_paths(self, ea, i=0):
@@ -212,7 +212,7 @@ class PathFinder(object):
 
 		if i == 1 and not self.tree:
 			self.build_call_tree(ea)
-		
+	
 		if i >= self.MAX_DEPTH:
 			return
 
@@ -281,11 +281,10 @@ class FunctionPathFinder(PathFinder):
 		xrefs = []
 
 		for x in idautils.XrefsTo(node):
-			if x.type != 21:
+			if x.type != idaapi.fl_F:
 				f = idaapi.get_func(x.frm)
 				if f and f.startEA not in xrefs:
 					xrefs.append(f.startEA)
-
 		return xrefs
 
 class BlockPathFinder(PathFinder):
@@ -293,33 +292,30 @@ class BlockPathFinder(PathFinder):
 	def __init__(self, destination):
 		func = idaapi.get_func(destination)
 		self.blocks = idaapi.FlowChart(f=func)
-		
+	
 		self.source_ea = func.startEA
-		self.destination = self.LookupBlock(destination)
-		
-		super(BlockPathFinder, self).__init__(self.destination.startEA)
+		dst_block = self.LookupBlock(destination)
+
+		if dst_block:
+			super(BlockPathFinder, self).__init__(dst_block.startEA)
 
 	def LookupBlock(self, ea):
 		for block in self.blocks:
-			if ea >= block.startEA and ea <= block.endEA:
+			if ea >= block.startEA and ea < block.endEA:
 				return block
 		return None
 		
 	def node_xrefs(self, node):
 		'''
-		Return a list of blocks the reference the provided block.
-		
-		Currently broken...
+		Return a list of blocks that reference the provided block.
 		'''
 		xrefs = []
 
-		if node != self.source_ea:
-			block = self.LookupBlock(node)
-			if block:
-				for xref in idautils.XrefsTo(block.startEA):
-					xref_block = self.LookupBlock(xref.frm)
-					if xref_block:
-						xrefs.append(xref_block.startEA)
-
+		block = self.LookupBlock(node)
+		if block:
+			for xref in idautils.XrefsTo(block.startEA):
+				xref_block = self.LookupBlock(xref.frm)
+				if xref_block and xref_block.startEA not in xrefs:
+					xrefs.append(xref_block.startEA)
 		return xrefs
 

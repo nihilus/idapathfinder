@@ -14,6 +14,7 @@ class idapathfinder_t(idaapi.plugin_t):
 	def init(self):
 		ui_path = "View/Graphs/"
 		self.menu_contexts = []
+		self.graph = None
 
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
 								"Find paths to the current function block",
@@ -64,12 +65,26 @@ class idapathfinder_t(idaapi.plugin_t):
 		for target in targets:
 			pf = pfc(target)
 			for source in sources:
-				results += pf.paths_from(source)
+				r = pf.paths_from(source)
+				if r:
+					results += r
+				else:
+					name = idc.Name(target)
+					if not name:
+						name = "0x%X" % target
+					print "No paths found to", name
 			del pf
 
-		g = pathfinder.PathFinderGraph(results, 'Path Graph')
-		g.Show()
-		del g
+		if results:
+			# Be sure to close any previous graph before creating a new one.
+			# Failure to do so may crash IDA.
+			try:
+				self.graph.Close()
+			except:
+				pass
+
+			self.graph = pathfinder.PathFinderGraph(results, 'Path Graph')
+			self.graph.Show()
 
 	def _get_user_selected_functions(self, many=False):
 		functions = []
@@ -121,8 +136,12 @@ class idapathfinder_t(idaapi.plugin_t):
 
 	def FindBlockPaths(self, arg):
 		target = idc.ScreenEA()
-		source = idaapi.get_func(idc.ScreenEA()).startEA
-		self._find_and_plot_paths([source], [target], pfc=pathfinder.BlockPathFinder)
+		source = idaapi.get_func(idc.ScreenEA())
+
+		if source:
+			self._find_and_plot_paths([source.startEA], [target], pfc=pathfinder.BlockPathFinder)
+		else:
+			print "Block graph error: The location must be part of a function!"
 
 def PLUGIN_ENTRY():
 	return idapathfinder_t()
