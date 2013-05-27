@@ -1,0 +1,57 @@
+DESCRIPTION
+
+	IDAPathFinder is a scriptable IDA plugin for identifying and graphing call paths between functions and code blocks.
+	It can plot paths between one or many functions and generates interactive call graphs.
+
+INSTALLATION
+
+	To install IDAPathFinder, just run the included install.py script:
+
+		$ python install.py /path/to/your/ida/install/directory
+
+USAGE
+
+	After installation, IDAPathFinder's graphing options will be listed in the IDA GUI under 'View -> Graphs'. 
+	Please refer to the Wiki page [http://code.google.com/p/idapathfinder/wiki/idapathfinder?tm=6] for screen shots 
+	and more detailed information.
+
+SCRIPTING
+
+	IDAPathFinder is fully scriptable, can be easily integrated into other IDA scripts or plugins and provides more
+	advanced features than the GUI.
+
+	IDAPathFinder works by first specifying a destination, then finding all paths between the destination and a source.
+	Once these paths have been generated, IDAPathFinder can optionally be instructed to display a call graph of the results.
+
+	There are two classes for finding paths: FunctionPathFinder (for finding function call paths) and BlockPathFinder (for
+	finding call paths between code blocks inside a function). Both function identically from an API perspective.
+
+	Let's start by finding all the paths between the 'main' function and the 'sprintf' function:
+
+		import idc
+		import pathfinder
+
+		pf = pathfinder.FunctionPathFinder(idc.LocByName('sprintf'))
+		results = pf.paths_from(idc.LocByName('main'))
+
+	The address passed to FunctionPathFinder may be any address inside the destination function. Likewise, if using
+	BlockPathFinder, the address may be any address inside the destination code block.
+
+	The paths_from method returns a list of lists, containing all the unique paths found between 'main' and 'sprintf'. Each
+	entry in each list is the effective address of a node in the path:
+
+		results = [
+				[51024, 107732, 203048],
+				[51024, 124236, 203048],
+				[51024, 124236, 159980, 203048]
+		]
+
+	Multiple results can be appended together if desired:
+
+		results += pf.paths_from(idc.LocByName('foo'))
+		results += pf.paths_from(idc.LocByName('bar'))
+
+	Finally, if you wish to plot a graph of these results inside of IDA, you can use IDAPathFinder's PathFinderGraph class:
+
+		pathfinder.PathFinderGraph(results, title='My graph').Show()
+		
