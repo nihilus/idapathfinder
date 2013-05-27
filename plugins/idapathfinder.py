@@ -17,35 +17,35 @@ class idapathfinder_t(idaapi.plugin_t):
 		self.graph = None
 
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
-								"Find paths to the current function block",
-								"Alt-9",
+								"Find code paths to the current function block",
+								"Alt-7",
 								0,
 								self.FindBlockPaths,
 								(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
-								"Find paths to here from multiple functions",
-								"Alt-8",
+								"Find function path(s) to here",
+								"Alt-6",
 								0,
 								self.FindPathsFromMany,
 								(None,)))
-		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
-								"Find paths to here from a single function",
-								"Alt-7",
-								0,
-								self.FindPathsFromSingle,
-								(None,)))
+		#self.menu_contexts.append(idaapi.add_menu_item(ui_path,
+		#						"Find paths to here from a single function",
+		#						"Alt-7",
+		#						0,
+		#						self.FindPathsFromSingle,
+		#						(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path, 
-								"Find paths from here to multiple functions", 
-								"Alt-6", 
+								"Find function path(s) from here", 
+								"Alt-5", 
 								0, 
 								self.FindPathsToMany, 
 								(None,)))
-		self.menu_contexts.append(idaapi.add_menu_item(ui_path, 
-								"Find paths from here to a single function", 
-								"Alt-5", 
-								0, 
-								self.FindPathsToSingle, 
-								(None,)))
+		#self.menu_contexts.append(idaapi.add_menu_item(ui_path, 
+		#						"Find paths from here to a single function", 
+		#						"Alt-5", 
+		#						0, 
+		#						self.FindPathsToSingle, 
+		#						(None,)))
 		return idaapi.PLUGIN_KEEP
 
 	def term(self):
@@ -88,9 +88,15 @@ class idapathfinder_t(idaapi.plugin_t):
 
 	def _get_user_selected_functions(self, many=False):
 		functions = []
+		ea = idc.ScreenEA()
 
 		while True:
-			function = idc.ChooseFunction('Select a function')
+			function = idc.ChooseFunction("Select a target function and click 'OK' until all functions have been selected. When finished, click 'Cancel' to display the graph.")
+			# ChooseFunction automatically jumps to the selected function
+			# if the enter key is pressed instead of clicking 'OK'. Annoying.
+			if idc.ScreenEA() != ea:
+				idc.Jump(ea)
+
 			if not function or function == idc.BADADDR:
 				break
 			else:
