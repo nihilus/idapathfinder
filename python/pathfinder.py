@@ -22,10 +22,13 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.history = []
 		self.includes = []
 		self.excludes = []
+		self.end_nodes = []
 		self.edge_nodes = []
+		self.start_nodes = []
 		self.delete_on_click = False
 		self.include_on_click = False
 		self.results = results
+		self.activate_count = 0
 
 	def Show(self):
 		'''
@@ -42,12 +45,16 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self.cmd_reset = self.AddCommand("Reset graph", "R")
 			self.cmd_delete = self.AddCommand("Exclude node", "X")
 			self.cmd_include = self.AddCommand("Include node", "I")
+			self.activate_count = 0
 			return True
 
 	def OnRefresh(self):
 		self.Clear()
 		self.ids = {}
 		self.nodes = {}
+		self.end_nodes = []
+		self.edge_nodes = []
+		self.start_nodes = []
 
 		for path in self.results:
 			nogo = False
@@ -75,16 +82,33 @@ class PathFinderGraph(idaapi.GraphViewer):
 					prev_node = self.ids[name]
 
 				try:
+					self.start_nodes.append(path[0])
+					self.end_nodes.append(path[-1])
 					self.edge_nodes.append(path[-2])
 				except:
 					pass
 	
 		return True
 
+	def OnActivate(self):
+		if self.activate_count > 0:
+			print "Refreshing due to activation...."
+			self.Refresh()
+		self.activate_count += 1
+
+	def OnHint(self, node_id):
+		return str(self[node_id])
+
 	def OnGetText(self, node_id):
 		node = str(self[node_id])
+
 		if self.nodes[node_id] in self.edge_nodes:
-			return (node, 0xff00f0)
+			return (node, 0x00ffff)
+		elif self.nodes[node_id] in self.start_nodes:
+			return (node, 0x00ff00)
+		elif self.nodes[node_id] in self.end_nodes:
+			return (node, 0x0000ff)
+
 		return node
 
 	def OnCommand(self, cmd_id):
@@ -174,22 +198,49 @@ class PathFinder(object):
 	def __exit__(self, t, v, traceback):
 		return
 
-	def paths_from(self, source, exclude=[], include=[]):
+	def _name2ea(self, nea):
+		if isinstance(nea, type('')):
+			return idc.LocByName(nea)
+		return nea
+
+	def paths_from(self, source, exclude=[], include=[], calls=[], nocalls=[]):
 		'''
 		Find paths from a source node to a destination node.
 
 		@source  - The source node ea to start the search from.
 		@exclude - A list of ea's to exclude from paths.
 		@include - A list of ea's to include in paths.
+		@calls   - A list of ea's that must be referenced from one of the path nodes.
+		@nocalls - A list of ea's that must not be referenced from any of the path nodes.
 
 		Returns a list of path lists.
 		'''
 		paths = []
+		good_xrefs = []
+		bad_xrefs = []
+
+		source = self._name2ea(source)
 
 		# If all the paths from the destination node have not already
 		# been calculated, find them first before doing anything else.
 		if not self.full_paths:
 			self.find_paths(self.destination)
+
+		for call in calls:
+			call = self._name2ea(call)
+
+			for xref in idautils.XrefsTo(call):
+				f = idaapi.get_func(xref.frm)
+				if f:
+					good_xrefs.append(f.startEA)
+
+		for call in nocalls:
+			call = self._name2ea(call)
+
+			for xref in idautils.XrefsTo(call):
+				f = idaapi.get_func(xref.frm)
+				if f:
+					bad_xrefs.append(f.startEA)
 
 		for p in self.full_paths:
 			if source in p:
@@ -208,6 +259,20 @@ class PathFinder(object):
 					for inc in include:
 						if inc in p:
 							index = orig_index
+							break
+
+				if good_xrefs:
+					orig_index = index
+					index = -1
+					
+					for xref in good_xrefs:
+						if xref in p:
+							index = orig_index
+
+				if bad_xrefs:
+					for xref in bad_xrefs:
+						if xref in p:
+							index = -1
 							break
 
 				if index > -1:
@@ -314,6 +379,10 @@ class FunctionPathFinder(PathFinder):
 	'''
 	Subclass to generate paths between functions.
 	'''
+
+	def __init__(self, destination):
+		func = idaapi.get_func(self._name2ea(destination))
+		super(FunctionPathFinder, self).__init__(func.startEA)
 
 	def node_xrefs(self, node):
 		'''
