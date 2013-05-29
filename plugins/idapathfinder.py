@@ -73,7 +73,6 @@ class idapathfinder_t(idaapi.plugin_t):
 					if not name:
 						name = "0x%X" % target
 					print "No paths found to", name
-			del pf
 
 		if results:
 			# Be sure to close any previous graph before creating a new one.
@@ -83,7 +82,7 @@ class idapathfinder_t(idaapi.plugin_t):
 			except:
 				pass
 
-			self.graph = pathfinder.PathFinderGraph(results, 'Path Graph')
+			self.graph = pathfinder.PathFinderGraph(results, 'Path Graph', pf.colorize)
 			self.graph.Show()
 
 	def _get_user_selected_functions(self, many=False):
@@ -91,7 +90,7 @@ class idapathfinder_t(idaapi.plugin_t):
 		ea = idc.ScreenEA()
 
 		while True:
-			function = idc.ChooseFunction("Select a target function and click 'OK' until all functions have been selected. When finished, click 'Cancel' to display the graph.")
+			function = idc.ChooseFunction("Select a function and click 'OK' until all functions have been selected. When finished, click 'Cancel' to display the graph.")
 			# ChooseFunction automatically jumps to the selected function
 			# if the enter key is pressed instead of clicking 'OK'. Annoying.
 			if idc.ScreenEA() != ea:

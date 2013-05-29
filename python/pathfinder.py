@@ -7,7 +7,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 	Class for generating an idaapi.GraphViewer graph.
 	'''
 
-	def __init__(self, results, title="PathFinder Graph"):
+	def __init__(self, results, title="PathFinder Graph", colorize=None):
 		'''
 		Class constructor.
 
@@ -28,6 +28,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.delete_on_click = False
 		self.include_on_click = False
 		self.results = results
+		self.colorize = colorize
 		self.activate_count = 0
 
 	def Show(self):
@@ -39,8 +40,6 @@ class PathFinderGraph(idaapi.GraphViewer):
 		if not idaapi.GraphViewer.Show(self):
 			return False
 		else:
-			# TODO: Add a colorize option to highlight all *displayed* nodes. Undo should undo the colorization as well.
-			#       Or maybe colorization should be automatic, but removed when the window is closed?
 			self.cmd_undo = self.AddCommand("Undo", "U")
 			self.cmd_reset = self.AddCommand("Reset graph", "R")
 			self.cmd_delete = self.AddCommand("Exclude node", "X")
@@ -91,8 +90,8 @@ class PathFinderGraph(idaapi.GraphViewer):
 		return True
 
 	def OnActivate(self):
+		# Can't call refresh on the first callback to OnActivate (results in crash).
 		if self.activate_count > 0:
-			print "Refreshing due to activation...."
 			self.Refresh()
 		self.activate_count += 1
 
@@ -100,16 +99,18 @@ class PathFinderGraph(idaapi.GraphViewer):
 		return str(self[node_id])
 
 	def OnGetText(self, node_id):
-		node = str(self[node_id])
+		name = str(self[node_id])
+		color = 0xff00ff
 
 		if self.nodes[node_id] in self.edge_nodes:
-			return (node, 0x00ffff)
+			color = 0x00ffff
 		elif self.nodes[node_id] in self.start_nodes:
-			return (node, 0x00ff00)
+			color = 0x00ff00
 		elif self.nodes[node_id] in self.end_nodes:
-			return (node, 0x0000ff)
+			color = 0x0000ff
 
-		return node
+		self._colorize(self.nodes[node_id], color)
+		return (name, color)
 
 	def OnCommand(self, cmd_id):
 		if self.cmd_undo == cmd_id:
@@ -134,6 +135,11 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self.includes.append(self.nodes[node_id])
 			self.history.append('include')
 		self.Refresh()
+
+	def OnClose(self):
+		# Clean up node colorization
+		for (name, node) in self.nodes.iteritems():
+			self._colorize(node, idc.DEFCOLOR)
 
 	def get_node_name(self, ea):
 		name = idc.Name(ea)
@@ -166,6 +172,10 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.delete_on_click = False
 		self.include_on_click = False
 		self.Refresh()
+
+	def _colorize(self, node, color=0x00FF00):
+		if callable(self.colorize):
+			self.colorize(node, color)
 
 class PathFinder(object):
 	'''
@@ -203,15 +213,15 @@ class PathFinder(object):
 			return idc.LocByName(nea)
 		return nea
 
-	def paths_from(self, source, exclude=[], include=[], calls=[], nocalls=[]):
+	def paths_from(self, source, exclude=[], include=[], xrefs=[], noxrefs=[]):
 		'''
 		Find paths from a source node to a destination node.
 
 		@source  - The source node ea to start the search from.
 		@exclude - A list of ea's to exclude from paths.
 		@include - A list of ea's to include in paths.
-		@calls   - A list of ea's that must be referenced from one of the path nodes.
-		@nocalls - A list of ea's that must not be referenced from any of the path nodes.
+		@xrefs   - A list of ea's that must be referenced from at least one of the path nodes.
+		@noxrefs - A list of ea's that must not be referenced from any of the path nodes.
 
 		Returns a list of path lists.
 		'''
@@ -226,19 +236,20 @@ class PathFinder(object):
 		if not self.full_paths:
 			self.find_paths(self.destination)
 
-		for call in calls:
-			call = self._name2ea(call)
+		for xref in xrefs:
+			xref = self._name2ea(xref)
 
-			for xref in idautils.XrefsTo(call):
-				f = idaapi.get_func(xref.frm)
+			for x in idautils.XrefsTo(xref):
+				f = idaapi.get_func(x.frm)
 				if f:
 					good_xrefs.append(f.startEA)
 
-		for call in nocalls:
-			call = self._name2ea(call)
+		for xref in noxrefs:
+			bad_xrefs.append(self._name2ea(xref))
+			xref = self._name2ea(xref)
 
-			for xref in idautils.XrefsTo(call):
-				f = idaapi.get_func(xref.frm)
+			for x in idautils.XrefsTo(xref):
+				f = idaapi.get_func(x.frm)
 				if f:
 					bad_xrefs.append(f.startEA)
 
@@ -268,6 +279,9 @@ class PathFinder(object):
 					for xref in good_xrefs:
 						if xref in p:
 							index = orig_index
+
+					if index == -1:
+						print "Sorry, couldn't find", good_xrefs, "in", p
 
 				if bad_xrefs:
 					for xref in bad_xrefs:
@@ -375,6 +389,17 @@ class PathFinder(object):
 		'''
 		return []
 
+	def colorize(self, node, color):
+		'''
+		This should be overidden by a subclass to properly colorize the specified node.
+
+		@node  - The Node object to be colorize.
+		@color - The HTML color code.
+		
+		Returns None.
+		'''
+		idc.SetColor(node, idc.CIC_ITEM, color)
+
 class FunctionPathFinder(PathFinder):
 	'''
 	Subclass to generate paths between functions.
@@ -396,6 +421,12 @@ class FunctionPathFinder(PathFinder):
 				if f and f.startEA not in xrefs:
 					xrefs.append(f.startEA)
 		return xrefs
+	
+	def colorize(self, node, color):
+		'''
+		Colorize the entire function.
+		'''
+		idc.SetColor(node, idc.CIC_FUNC, color)
 
 class BlockPathFinder(PathFinder):
 	'''
@@ -431,4 +462,73 @@ class BlockPathFinder(PathFinder):
 				if xref_block and xref_block.startEA not in xrefs:
 					xrefs.append(xref_block.startEA)
 		return xrefs
+
+	def colorize(self, node, color):
+		'''
+		Colorize the entire code block.
+		'''
+		block = self.LookupBlock(node)
+		if block:
+			ea = block.startEA
+			while ea < block.endEA:
+				idc.SetColor(ea, idc.CIC_ITEM, color)
+				ea += idaapi.decode_insn(ea)
+		
+
+class Find(object):
+
+	def __init__(self, start=[], end=[], include=[], exclude=[], xrefs=[], noxrefs=[]):
+		self.start = self._obj2list(start)
+		self.end = self._obj2list(end)
+		self.include = self._obj2list(include)
+		self.exclude = self._obj2list(exclude)
+		self.xrefs = self._obj2list(xrefs)
+		self.noxrefs = self._obj2list(noxrefs)
+
+		if len(self.start) > 0:
+			first_ea = self._obj2ea(self.start[0])
+			func = idaapi.get_func(self.start[0])
+			if func:
+				results = []
+
+				if func.startEA == first_ea:
+					pfclass = FunctionPathFinder
+					print "Finding function paths"
+				else:
+					pfclass = BlockPathFinder
+					print "Finding code paths"
+
+				
+				for destination in self.end:
+					pf = pfclass(destination)
+					for source in self.start:
+						results += pf.paths_from(source, exclude=self.exclude, include=self.include, xrefs=self.xrefs, noxrefs=self.noxrefs)
+					del pf
+
+				if results:
+					pg = PathFinderGraph(results)
+					pg.Show()
+					del pg
+
+	def _obj2list(self, obj):
+		'''
+		Converts the supplied object to a list, if it is not already a list.
+
+		@obj - The object.
+	
+		Returns a list.
+		'''
+		l = []
+
+		if not isinstance(obj, type([])):
+			l.append(self._obj2ea(obj))
+		else:
+			for o in obj:
+				l.append(self._obj2ea(o))
+		return l
+
+	def _obj2ea(self, ea):
+		if isinstance(ea, type('')):
+			return idc.LocByName(ea)
+		return ea
 
