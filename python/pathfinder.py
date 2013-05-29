@@ -86,7 +86,12 @@ class PathFinderGraph(idaapi.GraphViewer):
 					self.edge_nodes.append(path[-2])
 				except:
 					pass
-	
+			else:
+				# Be sure to uncolorize the nodes in the path here, else 
+				# user-excluded nodes will still remain colorized in the disassembly.
+				for node in path:
+					self._uncolorize(node)
+
 		return True
 
 	def OnActivate(self):
@@ -109,7 +114,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 		elif self.nodes[node_id] in self.end_nodes:
 			color = 0x0000ff
 
-		self._colorize(self.nodes[node_id], color)
+		self.colorize(self.nodes[node_id], color)
 		return (name, color)
 
 	def OnCommand(self, cmd_id):
@@ -139,7 +144,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 	def OnClose(self):
 		# Clean up node colorization
 		for (name, node) in self.nodes.iteritems():
-			self._colorize(node, idc.DEFCOLOR)
+			self._uncolorize(node)
 
 	def get_node_name(self, ea):
 		name = idc.Name(ea)
@@ -173,9 +178,8 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.include_on_click = False
 		self.Refresh()
 
-	def _colorize(self, node, color=0x00FF00):
-		if callable(self.colorize):
-			self.colorize(node, color)
+	def _uncolorize(self, node):
+		self.colorize(node, idc.DEFCOLOR)
 
 class PathFinder(object):
 	'''
@@ -426,7 +430,8 @@ class FunctionPathFinder(PathFinder):
 		'''
 		Colorize the entire function.
 		'''
-		idc.SetColor(node, idc.CIC_FUNC, color)
+		if idc.GetColor(node, idc.CIC_FUNC) != color:
+			idc.SetColor(node, idc.CIC_FUNC, color)
 
 class BlockPathFinder(PathFinder):
 	'''
@@ -436,7 +441,12 @@ class BlockPathFinder(PathFinder):
 	def __init__(self, destination):
 		func = idaapi.get_func(destination)
 		self.blocks = idaapi.FlowChart(f=func)
-	
+		self.block_table = {}
+
+		for block in self.blocks:
+			self.block_table[block.startEA] = block
+			self.block_table[block.endEA] = block
+
 		self.source_ea = func.startEA
 		dst_block = self.LookupBlock(destination)
 
@@ -444,9 +454,12 @@ class BlockPathFinder(PathFinder):
 			super(BlockPathFinder, self).__init__(dst_block.startEA)
 
 	def LookupBlock(self, ea):
-		for block in self.blocks:
-			if ea >= block.startEA and ea < block.endEA:
-				return block
+		try:
+			return self.block_table[ea]
+		except:
+			for block in self.blocks:
+				if ea >= block.startEA and ea < block.endEA:
+					return block
 		return None
 		
 	def node_xrefs(self, node):
@@ -468,7 +481,7 @@ class BlockPathFinder(PathFinder):
 		Colorize the entire code block.
 		'''
 		block = self.LookupBlock(node)
-		if block:
+		if block and idc.GetColor(block.startEA, idc.CIC_ITEM) != color:
 			ea = block.startEA
 			while ea < block.endEA:
 				idc.SetColor(ea, idc.CIC_ITEM, color)
