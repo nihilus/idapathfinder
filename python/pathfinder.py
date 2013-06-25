@@ -1,6 +1,7 @@
 import idc
 import idaapi
 import idautils
+import time
 
 class PathFinderGraph(idaapi.GraphViewer):
 	'''
@@ -238,7 +239,13 @@ class PathFinder(object):
 		# If all the paths from the destination node have not already
 		# been calculated, find them first before doing anything else.
 		if not self.full_paths:
-			self.find_paths(self.destination)
+			s = time.time()
+			self.find_paths(self.destination, source)
+			e = time.time()
+
+			print "find_paths took %f seconds" % (e-s)
+
+			print "Found %d paths" % len(self.full_paths)
 
 		for xref in xrefs:
 			xref = self._name2ea(xref)
@@ -258,7 +265,7 @@ class PathFinder(object):
 					bad_xrefs.append(f.startEA)
 
 		for p in self.full_paths:
-			if source in p:
+			try:
 				index = p.index(source)
 
 				if exclude:
@@ -293,18 +300,19 @@ class PathFinder(object):
 							index = -1
 							break
 
-				if index > -1:
-					# Be sure to include the destinatin and source nodes in the final path
-					p = [self.destination] + p[:index+1]
-					# The path is in reverse order (destination -> source), so flip it
-					p = p[::-1]
-					# Ignore any potential duplicate paths
-					if p not in paths:
-						paths.append(p)
+				# Be sure to include the destinatin and source nodes in the final path
+				p = [self.destination] + p[:index+1]
+				# The path is in reverse order (destination -> source), so flip it
+				p = p[::-1]
+				# Ignore any potential duplicate paths
+				if p not in paths:
+					paths.append(p)
+			except:
+				pass
 
 		return paths
 
-	def find_paths(self, ea, i=0):
+	def find_paths(self, ea, source=None, i=0):
 		'''
 		Performs a depth-first (aka, recursive) search to determine all possible call paths originating from the specified location.
 		Called internally by self.paths_from.
@@ -332,12 +340,12 @@ class PathFinder(object):
 		for (reference, children) in self.nodes[ea].iteritems():
 			# Does this node have a reference that isn't already listed in our current call path?
 			if reference and reference not in self.current_path:
-				# Increase the call depth by 1
-				self.depth += 1
-				# Add the reference to the current path
-				self.current_path.append(reference)
-				# Find all paths from this new reference
-				self.find_paths(reference, i)
+					# Increase the call depth by 1
+					self.depth += 1
+					# Add the reference to the current path
+					self.current_path.append(reference)
+					# Find all paths from this new reference
+					self.find_paths(reference, source, i)
 
 		# If we didn't find any additional references to append to the current call path (i.e., this_depth == call depth)
 		# then we have reached the limit of this call path.
@@ -474,6 +482,7 @@ class BlockPathFinder(PathFinder):
 				xref_block = self.LookupBlock(xref.frm)
 				if xref_block and xref_block.startEA not in xrefs:
 					xrefs.append(xref_block.startEA)
+
 		return xrefs
 
 	def colorize(self, node, color):

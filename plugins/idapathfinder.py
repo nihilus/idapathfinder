@@ -2,6 +2,7 @@ import idc
 import idaapi
 import idautils
 import pathfinder
+import time
 
 class idapathfinder_t(idaapi.plugin_t):
 
@@ -65,7 +66,10 @@ class idapathfinder_t(idaapi.plugin_t):
 		for target in targets:
 			pf = pfc(target)
 			for source in sources:
+				s = time.time()
 				r = pf.paths_from(source)
+				e = time.time()
+				print "paths_from took %f seconds." % (e-s)
 				if r:
 					results += r
 				else:
