@@ -17,12 +17,12 @@ class idapathfinder_t(idaapi.plugin_t):
 		self.menu_contexts = []
 		self.graph = None
 
-		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
-								"Find code paths to the current function block",
-								"Alt-7",
-								0,
-								self.FindBlockPaths,
-								(None,)))
+		#self.menu_contexts.append(idaapi.add_menu_item(ui_path,
+		#						"Find code paths to the current function block",
+		#						"Alt-7",
+		#						0,
+		#						self.FindBlockPaths,
+		#						(None,)))
 		self.menu_contexts.append(idaapi.add_menu_item(ui_path,
 								"Find function path(s) to here",
 								"Alt-6",
@@ -69,7 +69,8 @@ class idapathfinder_t(idaapi.plugin_t):
 				s = time.time()
 				r = pf.paths_from(source)
 				e = time.time()
-				print "paths_from took %f seconds." % (e-s)
+				#print "paths_from took %f seconds." % (e-s)
+
 				if r:
 					results += r
 				else:
@@ -92,6 +93,10 @@ class idapathfinder_t(idaapi.plugin_t):
 	def _get_user_selected_functions(self, many=False):
 		functions = []
 		ea = idc.ScreenEA()
+		try:
+			current_function = idc.GetFunctionAttr(ea, idc.FUNCATTR_START)
+		except:
+			current_function = None
 
 		while True:
 			function = idc.ChooseFunction("Select a function and click 'OK' until all functions have been selected. When finished, click 'Cancel' to display the graph.")
@@ -100,9 +105,9 @@ class idapathfinder_t(idaapi.plugin_t):
 			if idc.ScreenEA() != ea:
 				idc.Jump(ea)
 
-			if not function or function == idc.BADADDR:
+			if not function or function == idc.BADADDR or function == current_function:
 				break
-			else:
+			elif function not in functions:
 				functions.append(function)
 
 			if not many:

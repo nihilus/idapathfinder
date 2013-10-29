@@ -52,6 +52,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 		self.Clear()
 		self.ids = {}
 		self.nodes = {}
+		self.nodes_xrefs = {}
 		self.end_nodes = []
 		self.edge_nodes = []
 		self.start_nodes = []
@@ -70,6 +71,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 	
 			if not nogo:
 				prev_node = None
+				prev_nod_name = None
 
 				for node in path:
 					name = self.get_node_name(node)
@@ -78,8 +80,15 @@ class PathFinderGraph(idaapi.GraphViewer):
 						self.ids[name] = self.AddNode(name)
 						self.nodes[self.ids[name]] = node
 					if prev_node is not None:
-						self.AddEdge(prev_node, self.ids[name])
-					prev_node = self.ids[name]
+						self.AddEdge(prev_node_name, self.ids[name])
+						if node not in self.nodes_xrefs[prev_node]:
+							self.nodes_xrefs[prev_node].append(node)
+					prev_node = node
+					prev_node_name = self.ids[name]
+					try:
+						self.nodes_xrefs[prev_node]
+					except:
+						self.nodes_xrefs[prev_node] = []
 
 				try:
 					self.start_nodes.append(path[0])
@@ -106,7 +115,7 @@ class PathFinderGraph(idaapi.GraphViewer):
 
 	def OnGetText(self, node_id):
 		name = str(self[node_id])
-		color = 0xff00ff
+		color = idc.DEFCOLOR
 
 		if self.nodes[node_id] in self.edge_nodes:
 			color = 0x00ffff
@@ -129,7 +138,53 @@ class PathFinderGraph(idaapi.GraphViewer):
 			self._reset()
 
 	def OnDblClick(self, node_id):
-		idc.Jump(self.nodes[node_id])
+		edges = []
+		jump_ea = None
+		delim = "-"
+		header1 = "Edge Source"
+		header2 = "Edge Destination"
+		to_max_len = len(header2)
+		frm_max_len = len(header1)
+		this_func_ea = idc.LocByName(str(self[node_id]))
+
+		for named_xref_ea in self.nodes_xrefs[self.nodes[node_id]]:
+			named_xref = idc.Name(named_xref_ea)
+			print "Looking for %s => %s (0x%.8X)" % (str(self[node_id]), named_xref, named_xref_ea)
+
+			for xref in idautils.XrefsTo(named_xref_ea):
+				if xref.type in [idc.fl_CN, idc.fl_CF] and idc.GetFunctionAttr(xref.frm, idc.FUNCATTR_START) == this_func_ea:
+					xref_ea = xref.frm
+
+					if jump_ea is None:
+						jump_ea = xref_ea
+
+					frm = self.get_node_name(xref_ea)
+					to = self.get_node_name(named_xref_ea)
+
+					if len(frm) > frm_max_len:
+						frm_max_len = len(frm)
+					if len(to) > to_max_len:
+						to_max_len = len(to)
+
+					edges.append((frm, to))
+
+		if edges:
+			fmt = "| %%-%ds | %%-%ds |" % (frm_max_len, to_max_len)
+			total_len = frm_max_len + to_max_len + 7
+			
+			print delim * total_len
+			print fmt % (header1, header2)
+			print delim * total_len
+
+			for (frm, to) in edges:
+				print fmt % (frm, to)
+			
+			print delim * total_len
+
+		if jump_ea is None:
+			jump_ea = self.nodes[node_id]
+		
+		idc.Jump(jump_ea)
 
 	def OnClick(self, node_id):
 		if self.delete_on_click:
@@ -154,6 +209,15 @@ class PathFinderGraph(idaapi.GraphViewer):
 			if not name:
 				name = "0x%X" % ea
 		return name
+
+	def _get_first_xref(self, frm, to):
+		frm_func_ea = frm
+
+		for xref in idautils.XrefsTo(to):
+			if xref.frm != idc.BADADDR and idc.GetFunctionAttr(xref.frm. idc.FUNCATTR_START) == frm_func_ea:
+				return xref.frm
+
+		return frm
 
 	def _undo(self):
 		self.delete_on_click = False
@@ -242,10 +306,6 @@ class PathFinder(object):
 			s = time.time()
 			self.find_paths(self.destination, source)
 			e = time.time()
-
-			print "find_paths took %f seconds" % (e-s)
-
-			print "Found %d paths" % len(self.full_paths)
 
 		for xref in xrefs:
 			xref = self._name2ea(xref)
@@ -405,12 +465,12 @@ class PathFinder(object):
 		'''
 		This should be overidden by a subclass to properly colorize the specified node.
 
-		@node  - The Node object to be colorize.
+		@node  - The Node object to be colorized.
 		@color - The HTML color code.
 		
 		Returns None.
 		'''
-		idc.SetColor(node, idc.CIC_ITEM, color)
+		#idc.SetColor(node, idc.CIC_ITEM, color)
 
 class FunctionPathFinder(PathFinder):
 	'''
@@ -434,12 +494,12 @@ class FunctionPathFinder(PathFinder):
 					xrefs.append(f.startEA)
 		return xrefs
 	
-	def colorize(self, node, color):
-		'''
-		Colorize the entire function.
-		'''
-		if idc.GetColor(node, idc.CIC_FUNC) != color:
-			idc.SetColor(node, idc.CIC_FUNC, color)
+	#def colorize(self, node, color):
+	#	'''
+	#	Colorize the entire function.
+	#	'''
+	#	if idc.GetColor(node, idc.CIC_FUNC) != color:
+	#		idc.SetColor(node, idc.CIC_FUNC, color)
 
 class BlockPathFinder(PathFinder):
 	'''
@@ -515,10 +575,8 @@ class Find(object):
 
 				if func.startEA == first_ea:
 					pfclass = FunctionPathFinder
-					print "Finding function paths"
 				else:
 					pfclass = BlockPathFinder
-					print "Finding code paths"
 
 				
 				for destination in self.end:
